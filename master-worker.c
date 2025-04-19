@@ -13,13 +13,15 @@ int NUM_ITEMS; // Number of items collectively produced by ALL producers
 // Initialize shared buffer
 int *buffer;
 int produce_count = 0; // Number of items produced
+int consume_count = 0; // Number of items consumed
 int produce_idx = 0;   // Points to where to produce/put new item
 int consume_idx = 0;   // Points to where to consume/get new item
 
 // Synchronization variables
-sem_t mutex;
+sem_t mutex; // To protect buffer modification 
 sem_t empty;
 sem_t full;
+sem_t count; // To protect counter variables
 
 // Producer confirmation message
 void print_produced(int num, int master)
@@ -40,19 +42,28 @@ void *producer_thread(void *data)
 {
   int thread_id = *((int *)data);
 
-  while (produce_count < NUM_ITEMS)
+  while (1)
   {
 
-    // TODO: Implement the wait condition when the buffer is full
+    // Check if we've produced enough items
+    sem_wait(&count);
+    if (produce_count >= NUM_ITEMS)
+    {
+      sem_post(&count);
+      break;
+    }
+
+    int item = produce_count;
+    produce_count++;
+    sem_post(&count);
+
     sem_wait(&empty);
     sem_wait(&mutex); // Lock
 
-    buffer[produce_idx] = produce_count;
-    print_produced(produce_count, thread_id);
+    buffer[produce_idx] = item;
+    print_produced(item, thread_id);
     produce_idx = (produce_idx + 1) % BUFFER_SIZE;
-    produce_count++;
 
-    // TODO: Signal the consumers that buffer is not empty
     sem_post(&mutex); // Unlock
     sem_post(&full);
   }
@@ -66,10 +77,20 @@ void *consumer_thread(void *data)
 {
   int thread_id = *((int *)data);
 
-  for (int i = 0; i < (NUM_ITEMS) / NUM_WORKERS; i++)
+  while (1)
   {
 
-    // TODO: Implement the wait condition when the buffer is empty
+    // Check if we've consumed all items
+    sem_wait(&count);
+    if (consume_count >= NUM_ITEMS)
+    {
+      sem_post(&count);
+      break;
+    }
+
+    consume_count++;
+    sem_post(&count);
+
     sem_wait(&full);
     sem_wait(&mutex); // Lock
 
@@ -77,7 +98,6 @@ void *consumer_thread(void *data)
     print_consumed(item, thread_id);
     consume_idx = (consume_idx + 1) % BUFFER_SIZE;
 
-    // TODO: Signal the consumers that buffer is not full
     sem_post(&mutex); // Unlock
     sem_post(&empty);
   }
@@ -111,6 +131,7 @@ int main(int argc, char *argv[])
   sem_init(&mutex, 0, 1);
   sem_init(&full, 0, 0);
   sem_init(&empty, 0, BUFFER_SIZE);
+  sem_init(&count, 0, 1);
 
   // create master producer threads
   master_thread_id = (int *)malloc(sizeof(int) * NUM_MASTERS);
